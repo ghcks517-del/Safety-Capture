@@ -21,11 +21,11 @@ const LOCAL_STORAGE_PROJECTS_KEY = 'hanwha_field_projects_v1';
 function getLocalPhotos(): PhotoItem[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw !== null) return JSON.parse(raw);
   } catch (e) {
     console.error(e);
   }
-  return INITIAL_PHOTOS;
+  return [];
 }
 
 function saveLocalPhotos(photos: PhotoItem[]) {
@@ -70,23 +70,11 @@ export const api = {
     const unsubscribe = onSnapshot(
       photosCol,
       async (snapshot) => {
+        // If empty (e.g. user deleted all photos), do NOT auto-seed!
         if (snapshot.empty) {
-          try {
-            console.log('Seeding initial photos to Firestore...');
-            const batch = writeBatch(db);
-            INITIAL_PHOTOS.forEach((item) => {
-              const docRef = doc(db, 'photos', item.id);
-              batch.set(docRef, item);
-            });
-            await batch.commit();
-            onUpdate(INITIAL_PHOTOS);
-            saveLocalPhotos(INITIAL_PHOTOS);
-            return;
-          } catch (seedErr) {
-            console.warn('Initial seed error:', seedErr);
-            onUpdate(INITIAL_PHOTOS);
-            return;
-          }
+          saveLocalPhotos([]);
+          onUpdate([]);
+          return;
         }
 
         const items: PhotoItem[] = [];
@@ -246,13 +234,11 @@ export const api = {
   async getPhotos(): Promise<{ photos: PhotoItem[]; lastModified: number }> {
     try {
       const snap = await getDocs(collection(db, 'photos'));
-      if (!snap.empty) {
-        const items: PhotoItem[] = [];
-        snap.forEach((d) => items.push({ ...d.data() as PhotoItem, id: d.id }));
-        items.sort((a, b) => (b.registrationDate || '').localeCompare(a.registrationDate || ''));
-        saveLocalPhotos(items);
-        return { photos: items, lastModified: Date.now() };
-      }
+      const items: PhotoItem[] = [];
+      snap.forEach((d) => items.push({ ...d.data() as PhotoItem, id: d.id }));
+      items.sort((a, b) => (b.registrationDate || '').localeCompare(a.registrationDate || ''));
+      saveLocalPhotos(items);
+      return { photos: items, lastModified: Date.now() };
     } catch (err) {
       console.warn('Firestore getDocs error, using local fallback:', err);
     }
