@@ -1,0 +1,6 @@
+{
+  "name": "한화 현장 사진 뷰어 & 모바일 업로더",
+  "description": "휴대폰에서 촬영 및 업로드한 공사/현장 사진을 갤럭시 탭과 웹에서 실시간으로 확인하고, PJT명·협력업체·등록일자 필터링 및 전체화면으로 열람할 수 있는 현장 사진 뷰어 시스템입니다.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

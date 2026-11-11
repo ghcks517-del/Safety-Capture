@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    function isValidPhoto(data) {
+      return data.keys().hasAll(['url', 'projectName', 'partnerName', 'registrationDate'])
+        && data.url is string && data.url.size() > 0
+        && data.projectName is string && data.projectName.size() > 0 && data.projectName.size() <= 200
+        && data.partnerName is string && data.partnerName.size() > 0 && data.partnerName.size() <= 100
+        && data.registrationDate is string && data.registrationDate.size() > 0 && data.registrationDate.size() <= 20;
+    }
+
+    function isValidProject(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 200;
+    }
+
+    // Photos Collection
+    match /photos/{photoId} {
+      // Allow reading individual photo or querying list
+      allow get: if isValidId(photoId);
+      allow list: if true;
+
+      // Allow creating photos from smartphone or tablet
+      allow create: if isValidId(photoId) && isValidPhoto(request.resource.data);
+
+      // Allow updating photo details (PJT, partner, date, notes)
+      allow update: if isValidId(photoId) && isValidPhoto(request.resource.data);
+
+      // Allow deleting photos (admin operation in UI)
+      allow delete: if isValidId(photoId);
+    }
+
+    // Projects Collection
+    match /projects/{projectId} {
+      allow get: if isValidId(projectId);
+      allow list: if true;
+      allow create, update: if isValidId(projectId) && isValidProject(request.resource.data);
+      allow delete: if isValidId(projectId);
+    }
+  }
+}

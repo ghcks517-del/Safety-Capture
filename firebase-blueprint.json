@@ -1,0 +1,101 @@
+{
+  "entities": {
+    "Photo": {
+      "title": "Photo",
+      "description": "현장 공사 및 검측 사진 메타데이터",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "고유 식별자"
+        },
+        "url": {
+          "type": "string",
+          "description": "사진 이미지 URL 또는 Data URI"
+        },
+        "projectName": {
+          "type": "string",
+          "description": "PJT명 (프로젝트명)",
+          "maxLength": 200
+        },
+        "partnerName": {
+          "type": "string",
+          "description": "협력업체명",
+          "maxLength": 100
+        },
+        "registrationDate": {
+          "type": "string",
+          "description": "등록일자 (YYYY-MM-DD)",
+          "maxLength": 20
+        },
+        "uploadedAt": {
+          "type": "string",
+          "description": "등록 타임스탬프 (ISO string)"
+        },
+        "uploaderName": {
+          "type": "string",
+          "description": "등록자 성명",
+          "maxLength": 50
+        },
+        "workType": {
+          "type": "string",
+          "description": "공종 구분",
+          "maxLength": 50
+        },
+        "location": {
+          "type": "string",
+          "description": "세부 위치 및 구역",
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "description": "점검 내용 및 비고",
+          "maxLength": 1000
+        },
+        "fileSize": {
+          "type": "number",
+          "description": "파일 크기 (bytes)"
+        }
+      },
+      "required": [
+        "url",
+        "projectName",
+        "partnerName",
+        "registrationDate"
+      ]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "관리 대상 PJT 프로젝트 정보",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "프로젝트 식별자"
+        },
+        "name": {
+          "type": "string",
+          "description": "프로젝트명 (PJT명)",
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "생성 일시"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  "firestore": {
+    "/photos/{photoId}": {
+      "schema": "#/entities/Photo",
+      "description": "공사 현장 사진 목록"
+    },
+    "/projects/{projectId}": {
+      "schema": "#/entities/Project",
+      "description": "관리 대상 PJT 프로젝트 목록"
+    }
+  }
+}
