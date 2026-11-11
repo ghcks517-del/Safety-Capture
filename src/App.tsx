@@ -25,6 +25,7 @@ import { StatsSummary } from './components/StatsSummary';
 import { MobileFieldView } from './components/MobileFieldView';
 import { UploadModal } from './components/UploadModal';
 import { ProjectManageModal } from './components/ProjectManageModal';
+import { OfflineIndicator } from './components/OfflineIndicator';
 
 export default function App() {
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
@@ -574,6 +575,9 @@ export default function App() {
         onUpdateProject={handleUpdateProject}
         onDeleteProject={handleDeleteProject}
       />
+
+      {/* 7. Offline PWA Connectivity Indicator */}
+      <OfflineIndicator />
 
     </div>
   );

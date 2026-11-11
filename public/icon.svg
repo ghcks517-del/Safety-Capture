@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF9640"/>
+      <stop offset="50%" stop-color="#F37321"/>
+      <stop offset="100%" stop-color="#EB6100"/>
+    </linearGradient>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#F5F5F4"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#7C2D12" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- App Icon Background -->
+  <rect width="512" height="512" rx="120" fill="url(#bgGrad)"/>
+
+  <!-- Subtle Inner Border -->
+  <rect x="12" y="12" width="488" height="488" rx="108" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-opacity="0.25"/>
+
+  <!-- Main Camera & Shield Emblem -->
+  <g filter="url(#shadow)">
+    <!-- Shield Container -->
+    <path d="M256 90 L390 145 C390 260 330 350 256 400 C182 350 122 260 122 145 Z" fill="url(#shieldGrad)"/>
+
+    <!-- Camera Body Inside Shield -->
+    <rect x="180" y="200" width="152" height="114" rx="24" fill="#F37321"/>
+    <!-- Camera Top Bump -->
+    <path d="M220 200 L232 178 C234 174 238 172 243 172 L269 172 C274 172 278 174 280 178 L292 200 Z" fill="#EB6100"/>
+
+    <!-- Camera Lens Outer -->
+    <circle cx="256" cy="257" r="38" fill="#FFFFFF"/>
+    <!-- Camera Lens Middle -->
+    <circle cx="256" cy="257" r="28" fill="#292524"/>
+    <!-- Camera Lens Core reflection -->
+    <circle cx="256" cy="257" r="16" fill="#F37321"/>
+    <circle cx="262" cy="251" r="5" fill="#FFFFFF"/>
+
+    <!-- Camera Flash dot -->
+    <circle cx="308" cy="222" r="6" fill="#FFFFFF"/>
+
+    <!-- Safety Checkmark / Hanwha Emblem accent -->
+    <path d="M216 350 L244 378 L296 326" fill="none" stroke="#F37321" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

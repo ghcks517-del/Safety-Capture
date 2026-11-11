@@ -11,6 +11,7 @@ import {
   Upload
 } from 'lucide-react';
 import { DeviceLayout } from '../utils/useDeviceLayout';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface HeaderProps {
   deviceLayout: DeviceLayout;
@@ -46,15 +47,15 @@ export const Header: React.FC<HeaderProps> = ({
           
           {/* Logo & Auto Device Badge */}
           <div className="flex items-center gap-2.5 sm:gap-3">
-            {/* Hanwha Flame Icon */}
+            {/* Safety Capture Icon */}
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-[#EB6100] via-[#F37321] to-[#FFA048] flex items-center justify-center shadow-md shadow-[#F37321]/20 ring-2 ring-[#F37321]/30 shrink-0">
-              <span className="text-white font-black text-lg sm:text-xl tracking-tighter">H</span>
+              <span className="text-white font-black text-lg sm:text-xl tracking-tighter">S</span>
             </div>
             
             <div>
               <div className="flex items-center gap-1.5 sm:gap-2">
                 <span className="font-extrabold text-base sm:text-lg text-stone-900 tracking-tight">
-                  <span className="text-[#F37321]">HANWHA</span> 현장 사진 Viewer
+                  <span className="text-[#F37321]">Safety</span> Capture
                 </span>
                 
                 {/* Auto Device Indicator Pill */}
@@ -92,6 +93,9 @@ export const Header: React.FC<HeaderProps> = ({
               <RefreshCw className={`w-3 h-3 text-stone-400 ${isSyncing ? 'animate-spin' : ''}`} />
               <span className="font-semibold text-stone-700 hidden sm:inline">실시간 연동</span>
             </button>
+
+            {/* In-App PWA Install Button */}
+            <PWAInstallButton />
 
             {/* Tablet View: Quick Upload Button if opened on Galaxy Tab */}
             {!deviceLayout.isMobile && onOpenUploadModal && (
