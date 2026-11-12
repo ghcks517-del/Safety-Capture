@@ -3,7 +3,7 @@ import { PhotoItem } from '../types/photo';
 export const INITIAL_PHOTOS: PhotoItem[] = [
   {
     id: 'hanwha-p1',
-    url: 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=1600&q=80',
+    url: 'https://images.unsplash.com/photo-1517581177682-a085bb7ffb15?auto=format&fit=crop&w=1600&q=80',
     projectName: '한화솔루션 신안 태양광 발전소 PJT',
     partnerName: '동아건설산업',
     registrationDate: '2026-11-10',
@@ -17,7 +17,7 @@ export const INITIAL_PHOTOS: PhotoItem[] = [
   },
   {
     id: 'hanwha-p2',
-    url: 'https://images.unsplash.com/photo-1541888946425-d0fbb18615f3?auto=format&fit=crop&w=1600&q=80',
+    url: 'https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=1600&q=80',
     projectName: '한화건설 포레나 주거복합 현장',
     partnerName: '삼우토건',
     registrationDate: '2026-11-10',

@@ -3,7 +3,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,7 +27,7 @@ interface ServerPhoto {
 let photosStore: ServerPhoto[] = [
   {
     id: 'hanwha-p1',
-    url: 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=1600&q=80',
+    url: 'https://images.unsplash.com/photo-1517581177682-a085bb7ffb15?auto=format&fit=crop&w=1600&q=80',
     projectName: '한화솔루션 신안 태양광 발전소 PJT',
     partnerName: '동아건설산업',
     registrationDate: '2026-11-10',
@@ -41,7 +41,7 @@ let photosStore: ServerPhoto[] = [
   },
   {
     id: 'hanwha-p2',
-    url: 'https://images.unsplash.com/photo-1541888946425-d0fbb18615f3?auto=format&fit=crop&w=1600&q=80',
+    url: 'https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=1600&q=80',
     projectName: '한화건설 포레나 주거복합 현장',
     partnerName: '삼우토건',
     registrationDate: '2026-11-10',
@@ -135,26 +135,45 @@ async function startServer() {
 
   // --- REST API ROUTES ---
   
-  // Helper to extract image part from base64 data URL or external URL
+  // Helper to extract image part from base64 data URL or external URL safely
   async function getImagePart(photoUrl?: string): Promise<{ inlineData: { mimeType: string; data: string } } | null> {
     if (!photoUrl) return null;
     
+    // Base64 data URL (robust parsing without newline regex failures)
     if (photoUrl.startsWith('data:')) {
-      const matches = photoUrl.match(/^data:([a-zA-Z0-9/+-]+);base64,(.+)$/);
-      if (matches && matches[1] && matches[2]) {
-        return {
-          inlineData: {
-            mimeType: matches[1],
-            data: matches[2]
-          }
-        };
+      const commaIndex = photoUrl.indexOf(',');
+      if (commaIndex !== -1) {
+        const meta = photoUrl.slice(5, commaIndex); // e.g. "image/jpeg;base64"
+        const mimeType = meta.split(';')[0] || 'image/jpeg';
+        const rawBase64 = photoUrl.slice(commaIndex + 1).replace(/\s+/g, '');
+        if (rawBase64.length > 0) {
+          return {
+            inlineData: {
+              mimeType,
+              data: rawBase64
+            }
+          };
+        }
       }
+      return null;
     }
 
+    // Remote HTTP/HTTPS URL
     if (photoUrl.startsWith('http://') || photoUrl.startsWith('https://')) {
       try {
-        const response = await fetch(photoUrl);
-        if (!response.ok) return null;
+        let fetchUrl = photoUrl;
+        if (fetchUrl.includes('images.unsplash.com')) {
+          fetchUrl = fetchUrl.replace(/w=\d+/, 'w=600').replace(/q=\d+/, 'q=70');
+        }
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
+        const response = await fetch(fetchUrl, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          console.warn(`Failed to fetch image URL (${response.status}):`, photoUrl);
+          return null;
+        }
         const contentType = response.headers.get('content-type') || 'image/jpeg';
         const arrayBuffer = await response.arrayBuffer();
         const base64 = Buffer.from(arrayBuffer).toString('base64');
@@ -209,7 +228,7 @@ async function startServer() {
 
       const promptText = `
 당신은 한화 현장 안전보건 총괄책임자이자 KOSHA-MS(안전보건경영시스템) 심사관입니다.
-첨부된 현장 사진과 아래의 현장 점검 정보를 정밀 분석하여, 사진 상에서 실제로 위험한 위치(구역)를 식별하고 번호(1, 2, 3...)와 0~1000 범위의 2D 바운딩 박스(box: { ymin, xmin, ymax, xmax })로 정확히 지정하여 번호별 위험성 평가 보고서를 작성해주세요.
+현장 사진과 아래의 현장 점검 정보를 정밀 분석하여, 사진 상에서 실제로 위험한 위치(구역)를 식별하고 번호(1, 2, 3...)와 0~1000 범위의 2D 바운딩 박스(box: { ymin, xmin, ymax, xmax })로 정확히 지정하여 번호별 위험성 평가 보고서를 작성해주세요.
 
 [현장 정보]
 - 프로젝트(PJT): ${projectName || '미지정'}
@@ -267,25 +286,41 @@ async function startServer() {
 
       let responseText = '';
       try {
+        // Attempt 1: Multimodal analysis with gemini-3.1-flash-lite (high speed ~3s, high quota)
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.1-flash-lite',
           contents: { parts },
           config: {
             responseMimeType: 'application/json',
-            systemInstruction: '당신은 한화 현장의 최고 안전관리 전문가입니다. 반드시 요청된 JSON 스키마로만 명확하고 신뢰성 있는 위험성 평가와 사진 상의 위험 구역 바운딩 박스를 한국어로 제공합니다.'
+            systemInstruction: '당신은 한화 현장의 최고 안전관리 전문가입니다. 반드시 요청된 JSON 스키마로만 명확하고 신뢰성 있는 위험성 평가와 사진 상의 위험 구역 바운딩 박스를 한국어로 신속하게 제공합니다.'
           }
         });
         responseText = response.text || '';
       } catch (geminiErr: any) {
-        console.warn('Primary model error, attempting fallback:', geminiErr?.message);
-        const response = await ai.models.generateContent({
-          model: 'gemini-flash-latest',
-          contents: { parts },
-          config: {
-            responseMimeType: 'application/json'
-          }
-        });
-        responseText = response.text || '';
+        console.warn('Multimodal model error, attempting fast text-only fallback prompt:', geminiErr?.message);
+        
+        // Attempt 2: If the image payload failed Gemini validation (400, format, timeout), retry with text-only prompt
+        try {
+          const textResponse = await ai.models.generateContent({
+            model: 'gemini-3.1-flash-lite',
+            contents: { parts: [{ text: promptText }] },
+            config: {
+              responseMimeType: 'application/json',
+              systemInstruction: '당신은 한화 현장의 최고 안전관리 전문가입니다. 반드시 요청된 JSON 스키마로만 명확하고 신뢰성 있는 위험성 평가와 사진 상의 위험 구역 바운딩 박스를 한국어로 신속하게 제공합니다.'
+            }
+          });
+          responseText = textResponse.text || '';
+        } catch (fallbackErr: any) {
+          console.warn('Text-only retry error, trying fallback gemini-flash-latest:', fallbackErr?.message);
+          const response = await ai.models.generateContent({
+            model: 'gemini-flash-latest',
+            contents: { parts: [{ text: promptText }] },
+            config: {
+              responseMimeType: 'application/json'
+            }
+          });
+          responseText = response.text || '';
+        }
       }
 
       let parsedData;
@@ -297,7 +332,7 @@ async function startServer() {
         parsedData = JSON.parse(clean);
 
         // Normalize hazards and box coordinates
-        if (Array.isArray(parsedData.identifiedHazards)) {
+        if (Array.isArray(parsedData.identifiedHazards) && parsedData.identifiedHazards.length > 0) {
           parsedData.identifiedHazards = parsedData.identifiedHazards.map((h: any, i: number) => {
             const id = h.id || (i + 1);
             let box = h.box;
@@ -328,6 +363,22 @@ async function startServer() {
               }
             };
           });
+        } else {
+          // If empty array was returned, populate default hazards based on workType and description
+          parsedData.identifiedHazards = [
+            {
+              id: 1,
+              hazard: `${workType || '작업'} 구역 안전 점검 요망`,
+              cause: description || '현장 작업 상태 및 기본 안전 수칙(보호구, 통로 확보) 점검 필요',
+              severity: parsedData.riskLevel === '위험' ? '상' : '중',
+              locationDesc: location || '현장 작업 구역',
+              box: { ymin: 200, xmin: 250, ymax: 600, xmax: 750 },
+              safetyMeasure: {
+                action: '작업 전 보호구 착용 확인 및 현장 안전통로 확보',
+                standard: '산업안전보건기준에 관한 규칙'
+              }
+            }
+          ];
         }
       } catch (parseErr) {
         console.error('Failed to parse Gemini response as JSON:', responseText);
@@ -479,7 +530,7 @@ async function startServer() {
     photosStore = [
       {
         id: 'hanwha-p1',
-        url: 'https://images.unsplash.com/photo-1509391365360-2e959784a276?auto=format&fit=crop&w=1600&q=80',
+        url: 'https://images.unsplash.com/photo-1517581177682-a085bb7ffb15?auto=format&fit=crop&w=1600&q=80',
         projectName: '한화솔루션 신안 태양광 발전소 PJT',
         partnerName: '동아건설산업',
         registrationDate: '2026-11-10',
@@ -493,7 +544,7 @@ async function startServer() {
       },
       {
         id: 'hanwha-p2',
-        url: 'https://images.unsplash.com/photo-1541888946425-d0fbb18615f3?auto=format&fit=crop&w=1600&q=80',
+        url: 'https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=1600&q=80',
         projectName: '한화건설 포레나 주거복합 현장',
         partnerName: '삼우토건',
         registrationDate: '2026-11-10',

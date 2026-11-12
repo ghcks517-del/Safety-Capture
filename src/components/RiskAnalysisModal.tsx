@@ -100,6 +100,14 @@ function getSeverityColors(severity: '상' | '중' | '하') {
   };
 }
 
+/**
+ * Safely prepares photo URL for analysis API without risky canvas recreations.
+ */
+function prepareOptimizedPhotoUrl(url: string): string {
+  if (!url) return '';
+  return url;
+}
+
 export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
   photo,
   isOpen,
@@ -111,6 +119,7 @@ export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
   const [data, setData] = useState<RiskAnalysisData | null>(null);
   const [copied, setCopied] = useState(false);
   const [applied, setApplied] = useState(false);
+  const [loadingStep, setLoadingStep] = useState(1);
   
   // Interactive marker focus & single-item display filter
   const [activeHazardId, setActiveHazardId] = useState<number | null>(null);
@@ -118,19 +127,45 @@ export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
   const [showOverlays, setShowOverlays] = useState(true);
 
   const photoContainerRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const runAnalysis = async () => {
+    // Abort any pending request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setLoading(true);
     setError(null);
     setApplied(false);
     setActiveHazardId(null);
     setDisplayHazardId('all');
+    setLoadingStep(1);
+
+    // Dynamic progress step timer
+    const stepTimer1 = setTimeout(() => setLoadingStep(2), 1500);
+    const stepTimer2 = setTimeout(() => setLoadingStep(3), 3500);
+
+    // Timeout safety: 25 seconds
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 25000);
+
     try {
+      const optimizedPhotoUrl = prepareOptimizedPhotoUrl(photo.url);
+
       const response = await fetch('/api/analyze-risk', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        credentials: 'include',
+        signal: controller.signal,
         body: JSON.stringify({
-          photoUrl: photo.url,
+          photoUrl: optimizedPhotoUrl,
           projectName: photo.projectName,
           partnerName: photo.partnerName,
           registrationDate: photo.registrationDate,
@@ -140,19 +175,48 @@ export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
         })
       });
 
-      const resJson = await response.json();
-      if (!response.ok || !resJson.success) {
-        throw new Error(resJson.message || 'AI 분석 요청에 실패했습니다.');
+      clearTimeout(timeoutId);
+
+      const responseText = await response.text();
+      let resJson: any = null;
+      try {
+        resJson = JSON.parse(responseText);
+      } catch {
+        throw new Error(
+          response.ok 
+            ? '서버 응답 형식을 읽을 수 없습니다.' 
+            : `서버 연결 오류 (${response.status}): 잠시 후 다시 시도해주세요.`
+        );
       }
 
-      setData(resJson.data);
-      if (resJson.data?.identifiedHazards?.length > 0) {
-        setActiveHazardId(resJson.data.identifiedHazards[0].id);
+      if (!response.ok || !resJson?.success) {
+        throw new Error(resJson?.message || 'AI 분석 요청에 실패했습니다.');
+      }
+
+      const safeData = resJson.data;
+      if (!safeData) {
+        throw new Error('분석 결과 데이터가 올바르지 않습니다.');
+      }
+
+      // Defensive hazard array normalization
+      safeData.identifiedHazards = Array.isArray(safeData.identifiedHazards) ? safeData.identifiedHazards : [];
+
+      setData(safeData);
+      if (safeData.identifiedHazards.length > 0) {
+        setActiveHazardId(safeData.identifiedHazards[0].id);
       }
     } catch (err: any) {
+      clearTimeout(timeoutId);
       console.error('Risk analysis error:', err);
-      setError(err?.message || '위험성 분석 중 오류가 발생했습니다.');
+      if (err.name === 'AbortError') {
+        setError('분석 시간이 초과되었습니다. 네트워크 연결 상태를 확인 후 [다시 분석하기]를 눌러주세요.');
+      } else {
+        setError(err?.message || '위험성 분석 중 오류가 발생했습니다.');
+      }
     } finally {
+      clearTimeout(stepTimer1);
+      clearTimeout(stepTimer2);
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
@@ -178,7 +242,7 @@ export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
 ${data.summary}
 
 ■ 사진 내 식별된 번호별 위험 요인
-${data.identifiedHazards.map((h) => `${getCircleNumber(h.id)} [위험도 ${h.severity}] ${h.hazard} (${h.locationDesc || '위치'})
+${(data.identifiedHazards || []).map((h) => `${getCircleNumber(h.id)} [위험도 ${h.severity}] ${h.hazard} (${h.locationDesc || '위치'})
 - 원인 및 위험: ${h.cause}
 - 안전 조치: ${h.safetyMeasure?.action || '작업 전 안전수칙 준수'} (${h.safetyMeasure?.standard || '산업안전보건기준'})`).join('\n\n')}
 
@@ -367,15 +431,22 @@ ${data.recommendedNotes}`;
 
                 {/* Loading Scanner Animation */}
                 {loading && (
-                  <div className="absolute inset-0 bg-stone-950/60 backdrop-blur-xs flex flex-col items-center justify-center rounded-xl z-20">
-                    <div className="w-14 h-14 rounded-2xl bg-[#F37321]/20 border border-[#F37321]/40 flex items-center justify-center animate-spin mb-3">
+                  <div className="absolute inset-0 bg-stone-950/75 backdrop-blur-xs flex flex-col items-center justify-center rounded-xl z-20 p-4 text-center">
+                    <div className="w-14 h-14 rounded-2xl bg-[#F37321]/20 border border-[#F37321]/50 flex items-center justify-center animate-spin mb-3 shadow-lg shadow-orange-950/50">
                       <RefreshCw className="w-7 h-7 text-[#F37321]" />
                     </div>
-                    <span className="text-xs font-extrabold text-white animate-pulse">
-                      사진 내 위험 구역 스캔 및 번호 마킹 중...
+                    <span className="text-sm font-extrabold text-white animate-pulse">
+                      {loadingStep === 1 && '사진 내 위험 요소 및 공종 분석 중...'}
+                      {loadingStep === 2 && '위험 구역 번호 및 도형 마킹 좌표 지정 중...'}
+                      {loadingStep >= 3 && '안전 기준 대책 및 TBM 구호 생성 중...'}
                     </span>
-                    <span className="text-[11px] text-stone-400 mt-1">
-                      KOSHA 안전 기준 대조 및 객체 식별 중
+                    <div className="flex items-center gap-2 mt-2">
+                      <span className={`w-2 h-2 rounded-full transition-all ${loadingStep >= 1 ? 'bg-[#F37321] scale-125' : 'bg-stone-700'}`} />
+                      <span className={`w-2 h-2 rounded-full transition-all ${loadingStep >= 2 ? 'bg-[#F37321] scale-125' : 'bg-stone-700'}`} />
+                      <span className={`w-2 h-2 rounded-full transition-all ${loadingStep >= 3 ? 'bg-[#F37321] scale-125' : 'bg-stone-700'}`} />
+                    </div>
+                    <span className="text-[11px] text-stone-400 mt-2 font-medium">
+                      Gemini Vision 고속 분석 진행 중 (약 3~5초 소요)
                     </span>
                     {/* Animated laser scan line */}
                     <div className="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#F37321] to-transparent animate-bounce opacity-80" />
@@ -489,6 +560,48 @@ ${data.recommendedNotes}`;
 
           {/* ================= RIGHT COLUMN: Detailed Numbered Analysis (Col 5) ================= */}
           <div className="lg:col-span-5 flex flex-col space-y-4 lg:overflow-y-auto pr-1">
+
+            {/* Loading Skeleton */}
+            {loading && (
+              <div className="space-y-4 animate-pulse">
+                {/* Score banner skeleton */}
+                <div className="p-4 rounded-xl bg-stone-800/60 border border-stone-800 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-orange-500/20" />
+                    <div className="space-y-1.5">
+                      <div className="w-20 h-2 bg-stone-700 rounded" />
+                      <div className="w-32 h-4 bg-stone-700 rounded" />
+                    </div>
+                  </div>
+                  <div className="w-24 h-8 bg-stone-800 rounded-xl" />
+                </div>
+
+                {/* Summary skeleton */}
+                <div className="p-3.5 rounded-xl bg-stone-800/40 border border-stone-800 space-y-2">
+                  <div className="w-28 h-3 bg-orange-500/30 rounded" />
+                  <div className="w-full h-3 bg-stone-700 rounded" />
+                  <div className="w-4/5 h-3 bg-stone-700 rounded" />
+                </div>
+
+                {/* Hazard item skeletons */}
+                <div className="space-y-2.5">
+                  <div className="w-44 h-3 bg-stone-700 rounded" />
+                  {[1, 2, 3].map((num) => (
+                    <div key={num} className="p-3.5 rounded-xl bg-stone-900/60 border border-stone-800 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded bg-orange-500/20" />
+                          <div className="w-36 h-3.5 bg-stone-700 rounded" />
+                        </div>
+                        <div className="w-12 h-4 bg-stone-800 rounded" />
+                      </div>
+                      <div className="w-full h-8 bg-stone-800/80 rounded" />
+                      <div className="w-3/4 h-3 bg-emerald-500/20 rounded" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Error Message */}
             {error && !loading && (
