@@ -526,6 +526,7 @@ export default function App() {
           onDelete={(id) => {
             handleDeletePhoto(id);
           }}
+          onSaveUpdates={handleSavePhotoUpdates}
           isAdmin={isAdmin}
         />
       )}

@@ -21,11 +21,13 @@ import {
   MapPin, 
   User, 
   Layers, 
-  FileText 
+  FileText,
+  Sparkles 
 } from 'lucide-react';
 import { PhotoItem } from '../types/photo';
 import { formatDateKorean, formatTimeKorean } from '../utils/date';
 import { formatFileSize } from '../utils/compressor';
+import { RiskAnalysisModal } from './RiskAnalysisModal';
 
 interface PhotoDetailModalProps {
   photos: PhotoItem[];
@@ -34,6 +36,7 @@ interface PhotoDetailModalProps {
   onSelectPhotoId: (id: string) => void;
   onEdit: (photo: PhotoItem) => void;
   onDelete: (id: string) => void;
+  onSaveUpdates?: (id: string, updates: Partial<PhotoItem>) => Promise<void> | void;
   isAdmin: boolean;
 }
 
@@ -44,6 +47,7 @@ export const PhotoDetailModal: React.FC<PhotoDetailModalProps> = ({
   onSelectPhotoId,
   onEdit,
   onDelete,
+  onSaveUpdates,
   isAdmin
 }) => {
   const currentIndex = photos.findIndex((p) => p.id === currentPhotoId);
@@ -55,6 +59,7 @@ export const PhotoDetailModal: React.FC<PhotoDetailModalProps> = ({
   const [isPlayingSlideshow, setIsPlayingSlideshow] = useState(false);
   const [slideshowInterval, setSlideshowInterval] = useState(4); // seconds
   const [isBrowserFullscreen, setIsBrowserFullscreen] = useState(false);
+  const [showRiskModal, setShowRiskModal] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -434,6 +439,19 @@ export const PhotoDetailModal: React.FC<PhotoDetailModalProps> = ({
             {/* Bottom Actions inside Sidebar */}
             <div className="pt-4 mt-4 border-t border-stone-800 space-y-2">
               
+              {/* AI Risk Analysis Button (Right above edit & delete buttons) */}
+              <button
+                type="button"
+                onClick={() => setShowRiskModal(true)}
+                className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-[#F37321] via-orange-500 to-[#EB6100] hover:brightness-110 active:scale-[0.99] text-white text-xs font-extrabold flex items-center justify-center gap-2 transition shadow-md shadow-orange-950/50 cursor-pointer border border-orange-400/40 group"
+              >
+                <Sparkles className="w-4 h-4 text-amber-200 group-hover:rotate-12 transition-transform" />
+                <span>AI 위험성 분석</span>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-black/25 text-orange-100 border border-orange-300/20">
+                  Gemini
+                </span>
+              </button>
+
               {/* Edit & Delete Action Buttons (Always visible) */}
               <div className="grid grid-cols-2 gap-2">
                 <button
@@ -470,6 +488,20 @@ export const PhotoDetailModal: React.FC<PhotoDetailModalProps> = ({
         )}
 
       </div>
+
+      {/* AI Risk Analysis Popup Modal */}
+      {showRiskModal && (
+        <RiskAnalysisModal
+          photo={currentPhoto}
+          isOpen={showRiskModal}
+          onClose={() => setShowRiskModal(false)}
+          onApplyToDescription={async (recommendedText) => {
+            if (onSaveUpdates) {
+              await onSaveUpdates(currentPhoto.id, { description: recommendedText });
+            }
+          }}
+        />
+      )}
     </div>
   );
 };
