@@ -263,6 +263,11 @@ export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
       try {
         resJson = JSON.parse(responseText);
       } catch {
+        if (response.status === 405 || response.status === 404) {
+          throw new Error(
+            `이 배포 환경에서는 AI 분석 API 경로(/api/analyze-risk)가 정적 파일로 처리되어 연결할 수 없습니다 (HTTP ${response.status}). Vercel/서버 재배포 및 GEMINI_API_KEY 환경변수 설정이 필요합니다.`
+          );
+        }
         throw new Error(
           response.ok 
             ? '서버 응답 형식을 읽을 수 없습니다.' 
