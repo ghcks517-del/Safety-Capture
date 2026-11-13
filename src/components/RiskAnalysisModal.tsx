@@ -101,11 +101,58 @@ function getSeverityColors(severity: '상' | '중' | '하') {
 }
 
 /**
- * Safely prepares photo URL for analysis API without risky canvas recreations.
+ * Safely downscales large client-side data:image/ URLs before sending to API,
+ * bounded by a strict 1500ms timeout so it can never hang in PWA/iframe views.
  */
-function prepareOptimizedPhotoUrl(url: string): string {
+async function prepareOptimizedPhotoUrl(url: string): Promise<string> {
   if (!url) return '';
-  return url;
+  if (!url.startsWith('data:image/') || url.length < 250000) {
+    return url;
+  }
+
+  const resizeTask = new Promise<string>((resolve) => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const maxDim = 1024;
+          let width = img.width;
+          let height = img.height;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(url);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.80));
+        } catch {
+          resolve(url);
+        }
+      };
+      img.onerror = () => resolve(url);
+      img.src = url;
+    } catch {
+      resolve(url);
+    }
+  });
+
+  const timeoutFallback = new Promise<string>((resolve) => {
+    setTimeout(() => resolve(url), 1500);
+  });
+
+  return Promise.race([resizeTask, timeoutFallback]);
 }
 
 export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
@@ -116,6 +163,7 @@ export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
 }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
   const [data, setData] = useState<RiskAnalysisData | null>(null);
   const [copied, setCopied] = useState(false);
   const [applied, setApplied] = useState(false);
@@ -129,6 +177,16 @@ export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
   const photoContainerRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  const handleRefreshAuthAndRetry = () => {
+    try {
+      sessionStorage.setItem('safetycap_reopen_risk_photo_id', photo.id);
+      sessionStorage.setItem('safetycap_auto_run_risk', photo.id);
+    } catch {
+      // Ignore storage errors
+    }
+    window.location.href = `/?reauth=${Date.now()}`;
+  };
+
   const runAnalysis = async () => {
     // Abort any pending request
     if (abortControllerRef.current) {
@@ -139,6 +197,7 @@ export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
 
     setLoading(true);
     setError(null);
+    setAuthRequired(false);
     setApplied(false);
     setActiveHazardId(null);
     setDisplayHazardId('all');
@@ -154,7 +213,7 @@ export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
     }, 25000);
 
     try {
-      const optimizedPhotoUrl = prepareOptimizedPhotoUrl(photo.url);
+      const optimizedPhotoUrl = await prepareOptimizedPhotoUrl(photo.url);
 
       const response = await fetch('/api/analyze-risk', {
         method: 'POST',
@@ -163,6 +222,7 @@ export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
           'Accept': 'application/json'
         },
         credentials: 'include',
+        redirect: 'manual',
         signal: controller.signal,
         body: JSON.stringify({
           photoUrl: optimizedPhotoUrl,
@@ -177,7 +237,28 @@ export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
 
       clearTimeout(timeoutId);
 
+      // Detect Nginx auth-bridge redirect in standalone PWA mode
+      if (
+        response.type === 'opaqueredirect' ||
+        (response.status >= 300 && response.status < 400) ||
+        response.status === 0
+      ) {
+        setAuthRequired(true);
+        throw new Error(
+          '설치된 앱(PWA)의 보안 인증 세션이 만료되었거나 갱신이 필요합니다. 아래 버튼을 눌러 인증을 갱신해주세요.'
+        );
+      }
+
+      const contentType = response.headers.get('content-type') || '';
       const responseText = await response.text();
+
+      if (contentType.includes('text/html') || responseText.trim().startsWith('<!doctype') || responseText.trim().startsWith('<html')) {
+        setAuthRequired(true);
+        throw new Error(
+          '보안 인증 페이지가 반환되어 분석 응답을 받을 수 없습니다. 아래 버튼을 눌러 인증 세션을 갱신해주세요.'
+        );
+      }
+
       let resJson: any = null;
       try {
         resJson = JSON.parse(responseText);
@@ -185,12 +266,12 @@ export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
         throw new Error(
           response.ok 
             ? '서버 응답 형식을 읽을 수 없습니다.' 
-            : `서버 연결 오류 (${response.status}): 잠시 후 다시 시도해주세요.`
+            : `서버 연결 오류 (HTTP ${response.status}): 잠시 후 다시 시도해주세요.`
         );
       }
 
       if (!response.ok || !resJson?.success) {
-        throw new Error(resJson?.message || 'AI 분석 요청에 실패했습니다.');
+        throw new Error(resJson?.message || `AI 분석 요청 실패 (HTTP ${response.status})`);
       }
 
       const safeData = resJson.data;
@@ -211,7 +292,22 @@ export const RiskAnalysisModal: React.FC<RiskAnalysisModalProps> = ({
       if (err.name === 'AbortError') {
         setError('분석 시간이 초과되었습니다. 네트워크 연결 상태를 확인 후 [다시 분석하기]를 눌러주세요.');
       } else {
-        setError(err?.message || '위험성 분석 중 오류가 발생했습니다.');
+        // Probe /api/health if network error occurred to check if auth redirect is blocking requests
+        if (err instanceof TypeError && err.message.toLowerCase().includes('fetch')) {
+          try {
+            const probe = await fetch('/api/health', { redirect: 'manual', credentials: 'include' });
+            if (probe.type === 'opaqueredirect' || probe.status === 0 || (probe.status >= 300 && probe.status < 400)) {
+              setAuthRequired(true);
+              setError('설치된 앱(PWA)의 보안 인증 세션 갱신이 필요합니다. 아래 버튼을 눌러 인증을 갱신해주세요.');
+              return;
+            }
+          } catch {
+            // Network truly offline
+          }
+          setError('서버에 연결할 수 없습니다. 인터넷(Wi-Fi/LTE) 연결을 확인하거나 앱을 다시 열어주세요.');
+        } else {
+          setError(err?.message || '위험성 분석 중 오류가 발생했습니다.');
+        }
       }
     } finally {
       clearTimeout(stepTimer1);
@@ -605,20 +701,32 @@ ${data.recommendedNotes}`;
 
             {/* Error Message */}
             {error && !loading && (
-              <div className="p-4 rounded-xl bg-red-950/40 border border-red-800/60 text-red-200 text-xs space-y-2">
+              <div className="p-4 rounded-xl bg-red-950/40 border border-red-800/60 text-red-200 text-xs space-y-3">
                 <div className="flex items-center gap-2 font-bold text-red-300">
-                  <AlertTriangle className="w-4 h-4" />
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
                   분석 중 문제가 발생했습니다
                 </div>
-                <p>{error}</p>
-                <button
-                  type="button"
-                  onClick={runAnalysis}
-                  className="mt-2 px-3 py-1.5 rounded-lg bg-red-800/60 hover:bg-red-700 text-white font-bold text-xs inline-flex items-center gap-1.5 transition"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  다시 분석하기
-                </button>
+                <p className="leading-relaxed">{error}</p>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  {authRequired && (
+                    <button
+                      type="button"
+                      onClick={handleRefreshAuthAndRetry}
+                      className="px-3.5 py-2 rounded-lg bg-[#F37321] hover:bg-[#EB6100] text-white font-bold text-xs inline-flex items-center gap-1.5 transition shadow-md cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      인증 세션 갱신 후 다시 분석
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={runAnalysis}
+                    className="px-3 py-2 rounded-lg bg-red-800/60 hover:bg-red-700 text-white font-bold text-xs inline-flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    다시 분석하기
+                  </button>
+                </div>
               </div>
             )}
 

@@ -3,7 +3,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -134,6 +134,11 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 
   // --- REST API ROUTES ---
+  app.use('/api', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    next();
+  });
   
   // Helper to extract image part from base64 data URL or external URL safely
   async function getImagePart(photoUrl?: string): Promise<{ inlineData: { mimeType: string; data: string } } | null> {
@@ -285,41 +290,56 @@ async function startServer() {
       parts.push({ text: promptText });
 
       let responseText = '';
+      const systemInstruction = '당신은 한화 현장의 최고 안전관리 전문가입니다. 반드시 요청된 JSON 스키마로만 명확하고 신뢰성 있는 위험성 평가와 사진 상의 위험 구역 바운딩 박스를 한국어로 신속하게 제공합니다.';
+
       try {
-        // Attempt 1: Multimodal analysis with gemini-3.1-flash-lite (high speed ~3s, high quota)
+        // Attempt 1: Multimodal analysis with gemini-3.1-flash-lite
         const response = await ai.models.generateContent({
           model: 'gemini-3.1-flash-lite',
           contents: { parts },
           config: {
             responseMimeType: 'application/json',
-            systemInstruction: '당신은 한화 현장의 최고 안전관리 전문가입니다. 반드시 요청된 JSON 스키마로만 명확하고 신뢰성 있는 위험성 평가와 사진 상의 위험 구역 바운딩 박스를 한국어로 신속하게 제공합니다.'
+            systemInstruction
           }
         });
         responseText = response.text || '';
-      } catch (geminiErr: any) {
-        console.warn('Multimodal model error, attempting fast text-only fallback prompt:', geminiErr?.message);
-        
-        // Attempt 2: If the image payload failed Gemini validation (400, format, timeout), retry with text-only prompt
+      } catch (err1: any) {
+        console.warn('Attempt 1 (gemini-3.1-flash-lite multimodal) failed:', err1?.message);
         try {
-          const textResponse = await ai.models.generateContent({
-            model: 'gemini-3.1-flash-lite',
-            contents: { parts: [{ text: promptText }] },
+          // Attempt 2: Multimodal analysis with gemini-flash-lite-latest
+          const response = await ai.models.generateContent({
+            model: 'gemini-flash-lite-latest',
+            contents: { parts },
             config: {
               responseMimeType: 'application/json',
-              systemInstruction: '당신은 한화 현장의 최고 안전관리 전문가입니다. 반드시 요청된 JSON 스키마로만 명확하고 신뢰성 있는 위험성 평가와 사진 상의 위험 구역 바운딩 박스를 한국어로 신속하게 제공합니다.'
-            }
-          });
-          responseText = textResponse.text || '';
-        } catch (fallbackErr: any) {
-          console.warn('Text-only retry error, trying fallback gemini-flash-latest:', fallbackErr?.message);
-          const response = await ai.models.generateContent({
-            model: 'gemini-flash-latest',
-            contents: { parts: [{ text: promptText }] },
-            config: {
-              responseMimeType: 'application/json'
+              systemInstruction
             }
           });
           responseText = response.text || '';
+        } catch (err2: any) {
+          console.warn('Attempt 2 (gemini-flash-lite-latest multimodal) failed:', err2?.message);
+          try {
+            // Attempt 3: Text-only fallback with gemini-3.1-flash-lite
+            const textResponse = await ai.models.generateContent({
+              model: 'gemini-3.1-flash-lite',
+              contents: { parts: [{ text: promptText }] },
+              config: {
+                responseMimeType: 'application/json',
+                systemInstruction
+              }
+            });
+            responseText = textResponse.text || '';
+          } catch (err3: any) {
+            console.warn('Attempt 3 (text-only) failed, trying gemini-flash-lite-latest:', err3?.message);
+            const response = await ai.models.generateContent({
+              model: 'gemini-flash-lite-latest',
+              contents: { parts: [{ text: promptText }] },
+              config: {
+                responseMimeType: 'application/json'
+              }
+            });
+            responseText = response.text || '';
+          }
         }
       }
 
@@ -617,6 +637,8 @@ async function startServer() {
     res.json({ success: true, count: photosStore.length });
   });
 
+  const server = http.createServer(app);
+
   // Frontend integration: Vite middleware in development, static in production
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.resolve(__dirname, 'dist')));
@@ -624,42 +646,43 @@ async function startServer() {
       res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
     });
   } else {
-    const vite = await createViteServer({
+    // Initialize Vite in the background so port 3000 binds immediately for health checks
+    const vitePromise = createViteServer({
       server: {
         middlewareMode: true,
         hmr: false,
+        ws: false,
       },
       appType: 'spa',
     });
-    app.use(vite.middlewares);
+
+    app.use(async (req, res, next) => {
+      try {
+        const vite = await vitePromise;
+        vite.middlewares(req, res, next);
+      } catch (err) {
+        next(err);
+      }
+    });
   }
 
-  const server = http.createServer(app);
-
-  server.on('error', (err: any) => {
-    if (err.code === 'EADDRINUSE') {
-      console.warn(`[Safety Capture] Port ${PORT} temporarily in use, will retry...`);
-    } else {
-      console.error('[Safety Capture] Server error:', err);
-    }
-  });
-
   const startListening = (attempt = 1) => {
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log(`[Safety Capture] Server running on http://0.0.0.0:${PORT}`);
-    });
-
-    server.once('error', (err: any) => {
-      if (err.code === 'EADDRINUSE' && attempt <= 5) {
-        console.warn(`[Safety Capture] Port ${PORT} in use, retrying in 1s (attempt ${attempt}/5)...`);
+    const onError = (err: any) => {
+      if (err.code === 'EADDRINUSE' && attempt <= 10) {
+        console.warn(`[Safety Capture] Port ${PORT} in use, retrying in 500ms (attempt ${attempt}/10)...`);
         setTimeout(() => {
-          server.close();
           startListening(attempt + 1);
-        }, 1000);
+        }, 500);
       } else {
         console.error('[Safety Capture] Fatal server listen error:', err);
         process.exit(1);
       }
+    };
+
+    server.once('error', onError);
+    server.listen(PORT, '0.0.0.0', () => {
+      server.removeListener('error', onError);
+      console.log(`[Safety Capture] Server running on http://0.0.0.0:${PORT}`);
     });
   };
 

@@ -63,10 +63,19 @@ export const PhotoDetailModal: React.FC<PhotoDetailModalProps> = ({
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Reset zoom & rotation when photo changes
+  // Reset zoom & rotation when photo changes, and auto-open risk modal if returning from PWA re-auth
   useEffect(() => {
     setZoomLevel(1);
     setRotation(0);
+    try {
+      const autoRiskId = sessionStorage.getItem('safetycap_auto_run_risk');
+      if (autoRiskId && autoRiskId === currentPhotoId) {
+        sessionStorage.removeItem('safetycap_auto_run_risk');
+        setShowRiskModal(true);
+      }
+    } catch {
+      // Ignore storage errors
+    }
   }, [currentPhotoId]);
 
   // Slideshow timer

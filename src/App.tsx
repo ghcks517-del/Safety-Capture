@@ -96,6 +96,15 @@ export default function App() {
         return updatedPhotos;
       });
       setIsSyncing(false);
+      try {
+        const reopenId = sessionStorage.getItem('safetycap_reopen_risk_photo_id');
+        if (reopenId && updatedPhotos.some((p) => p.id === reopenId)) {
+          sessionStorage.removeItem('safetycap_reopen_risk_photo_id');
+          setDetailPhotoId(reopenId);
+        }
+      } catch {
+        // Ignore storage errors
+      }
     });
 
     return () => unsubscribe();
